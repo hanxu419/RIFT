@@ -1,0 +1,9 @@
+include README.zh-CN.md DATASETS.md
+include ThirdPartyNotices.txt requirements.txt
+recursive-include kge *.py *.yaml
+recursive-include rift *.py
+recursive-include tools *.py
+recursive-include docs *.md
+recursive-include data/config *.yaml
+include data/remap_icews05_15_time.py
+global-exclude *.py[cod] *.pckl *.pickle *.pt *.pth *.ckpt *.log

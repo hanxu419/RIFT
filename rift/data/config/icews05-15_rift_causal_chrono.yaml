@@ -1,0 +1,162 @@
+# ICEWS05-15 with chronological time IDs; generate data via python data/remap_icews05_15_time.py
+# RIFT strict-history, same-time filtered baseline. See README.zh-CN.md and the configuration comments below.
+job.type: train
+job.device: cuda
+job.multi_gpu: false
+
+protocol:
+  name: strict_query_time
+  task: observed_range_completion
+  history_source_splits: [train]
+  history_time_boundary: strict_lt
+  same_time_history: excluded
+  time_ids_chronological: true
+  filter_scope: query_time
+  validation_uses_test_labels: false
+  candidate_entities: all
+  ranking_directions: [head, tail]
+  note: "chronologically remapped ICEWS05-15 still uses overlapping split dates"
+
+dataset.name: icews05-15-chrono
+model: rift
+
+random_seed:
+  python: 333
+  torch: 339
+  numpy: 333
+
+# ========== Evaluation ==========
+eval:
+  filter_splits: [train, valid]
+  tie_handling: rounded_mean_rank
+  filter_time: true
+  filter_with_test: false
+  batch_size: 512
+  metrics_per:
+    head_and_tail: true
+    relation_type: true
+  trace_level: example
+
+# ========== Training ==========
+train:
+  type: 1vsAll
+  loss: kl
+  auto_correct: true
+  batch_size: 256
+  max_epochs: 200          # 🔒 最多 200 轮
+  lr_scheduler: ""         # 使用下面的 schedule
+  loss_arg: .nan
+  optimizer: Adamax
+  optimizer_args:
+    lr: 0.008
+    warmup: 0.1
+    schedule: warmup_linear_xdl
+    eps: 1e-6
+    weight_decay: 0.01
+    max_grad_norm: 1.0
+
+# ========== Embedding ==========
+lookup_embedder:
+  dim: 256
+  dropout: 0.0
+  initialize: normal_
+  initialize_args:
+    normal_:
+      std: 0.02
+
+# ========== RIFT ==========
+rift:
+  transformer_impl: huggingface
+  require_legacy_bert: true
+  nlayer: 4
+  nhead: 8
+  ff_dim: 1024
+  activation: gelu
+  hidden_dropout: 0.1
+  attn_dropout: 0.1
+  output_dropout: 0.4
+
+  # Context
+  max_context_size: 32
+  ctx_dropout: 0.25
+
+  # MLM auxiliary (开启)
+  add_mlm_loss: true
+  self_dropout: 0.5
+  mlm_mask: 1.0
+  mlm_replace: 0.3
+
+  # 时间有序历史邻居
+  neighbor:
+    sampling: time_ordered
+    order: time_desc
+    causal: true
+
+  # RCAP
+  rcap:
+    enable: true
+    key_dim: 64
+    attn_dropout: 0.1
+
+  # GCFF
+  gcff:
+    enable: true
+    use_relation: true
+    global_proj: true
+    gate_hidden: 256
+    gate_dropout: 0.1
+    dropout: 0.1
+
+  # CDC
+  cdc:
+    enable: true
+    weight: 0.05
+    tau: 0.07
+    subsample_ratio: 0.1
+    shuffle_relation: true
+    shuffle_time: false
+
+  # 时间作为线性变换 / 矩阵映射
+  cte:
+    enable: true
+    type: basis_block
+    basis_k: 16
+    block_size: 16
+    coeff_mlp_hidden: 128
+    coeff_mlp_layers: 2
+    coeff_temperature: 1.0
+    activation: gelu
+    residual: true
+    diagonal_only: false
+    scale_init: 0.0
+    basis_init_std: 0.02
+    stability_reg: 1.0e-4
+
+  # 相对时间 Δt
+  rel_dt:
+    enable: true
+    num_buckets: 64
+    exact_buckets: 32
+    max_dt: -1
+    mode: log
+    dropout: 0.1
+    scale_init: 0.0
+
+  # Copy–Generation 混合
+  hepe:
+    enable: true
+    mode: fixed
+    correct_pairwise: true
+    weight: 0.5
+    normalize: mean
+    time_gamma: 0.999
+    apply_in_training: true
+
+# ========== Early Stopping ==========
+valid:
+  metric: mean_reciprocal_rank_filtered
+  early_stopping:
+    min_threshold:
+      epochs: 50           # 🔒 前 50 轮绝不早停
+      metric_value: 0.0
+    patience: 10           # 🔓 50 轮后，10 轮无提升 → 停

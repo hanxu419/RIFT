@@ -1,0 +1,8 @@
+# Install a CUDA-enabled PyTorch build first using the official PyTorch selector.
+# These are the remaining runtime requirements for the RIFT code.
+torch>=2.0
+numpy>=1.23
+PyYAML>=6.0
+pandas>=1.5
+networkx>=2.8
+# Formal benchmark configs additionally require: pip install -e ".[legacy-bert]"

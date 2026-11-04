@@ -1,0 +1,148 @@
+import: [lookup_embedder]
+
+rift:
+  # Core encoder/backbone
+  transformer_impl: pytorch
+  # New RIFT configs set true to match the saved checkpoint architecture.
+  require_legacy_bert: false
+  use_preln: false
+  use_rat: false
+
+  # dim=-1 means: inherit entity_embedder.dim (from lookup_embedder.dim)
+  dim: -1
+
+  # NOTE: In this implementation, nlayer affects BOTH:
+  #  - MLP-Mixer depth (mixer2.MLPMixer depth)
+  #  - Atom encoder layers = nlayer // 2 (BertEncoder)
+  # Keep modest for 24GB GPUs.
+  nlayer: 2
+  nhead: 4
+
+  # ff_dim is used BOTH:
+  #  - Mixer token-mixing MLP hidden size (ctx_dim)
+  #  - Atom encoder FFN intermediate_size
+  # Large ff_dim is the #1 memory driver. Keep <=512 for 24GB.
+  ff_dim: 512
+  hidden_dropout: 0.1
+  attn_dropout: 0.1
+
+  # Event context / auxiliary objectives
+  ctx_dropout: 0.25
+  output_dropout: 0.2
+  rel_dropout: 0.0
+  self_dropout: 0.5
+  mlm_mask: 1.0
+  mlm_replace: 0.0
+  add_mlm_loss: true
+  activation: gelu
+  similarity: DotProduct
+  initializer_range: 0.02
+
+  # Neighbor context length
+  max_context_size: 25
+
+  # Stage-2: time-ordered neighbor sampling
+  neighbor:
+    sampling: time_ordered
+    order: time_desc
+    # Capacity for the shared neighbor-index utility; strict retrieval uses
+    # the complete causal index before applying the context budget.
+    index_max_neighbors: 128
+    index_seed: -1
+    # False reproduces saved legacy checkpoints; new RIFT runs set True.
+    causal: false
+    # Experimental L=32 retrieval: latest 16 events plus 16 older events
+    # matching the query relation, with recency backfill. Requires causal=true.
+    # Keep false for existing checkpoints and baseline comparisons.
+    dual_history: false
+    # Explicit retrieval policy for controlled L=32 comparisons. The legacy
+    # dual_history=true switch still selects relation_16_16 when this is latest32.
+    retrieval_policy: latest32
+
+  # Stage-2: RCAP
+  rcap:
+    enable: true
+    key_dim: 64
+    attn_dropout: 0.1
+
+  # Stage-2: GCFF
+  gcff:
+    enable: true
+    use_relation: true
+    global_proj: true
+    gate_hidden: 256
+    gate_dropout: 0.1
+    dropout: 0.1
+
+  # Stage-2: CDC
+  # CDC triggers extra encoder forwards; to fit 24GB, keep subsample_ratio modest.
+  cdc:
+    enable: true
+    weight: 0.05
+    tau: 0.07
+    subsample_ratio: 0.10
+    shuffle_relation: true
+    shuffle_time: false
+
+  # CTE: time evolution
+  cte:
+    enable: true
+    type: basis_block
+    basis_k: 16
+    block_size: 16
+    coeff_mlp_hidden: 256
+    coeff_mlp_layers: 2
+    coeff_temperature: 1.0
+    activation: gelu
+    residual: true
+    diagonal_only: false
+    scale_init: 0.0
+    basis_init_std: 0.02
+    stability_reg: 1.0e-4
+
+  rel_dt:
+    enable: true
+    # Number of Δt buckets for relative time embedding (log-binning)
+    num_buckets: 64
+    # Use exact (small) buckets for recent events, and log buckets for long spans
+    exact_buckets: 32
+    # Max Δt cap; -1 means infer from dataset max time id
+    max_dt: -1
+    mode: log
+    dropout: 0.1
+    # Learnable scale on the Δt embedding, initialized near 0 for stability
+    scale_init: 0.0
+
+  hepe:
+    enable: true
+    mode: fixed
+    # Saved checkpoints used the legacy pairwise true-score behavior. New RIFT
+    # configs set this true so pairwise and full-candidate HEPE agree.
+    correct_pairwise: false
+    # Adaptive mode reweights historical copies by RCAP attention and a query gate.
+    attention_mix: 1.0
+    gate_enabled: true
+    gate_hidden: 64
+    # Use query-minus-event age for strict causal history.
+    # Set none only for a controlled no-time-feature ablation.
+    gate_time_feature: past_age
+    # Additive logit bias strength; tune 0.1~1.0
+    weight: 0.5
+    # mean: divide by neighbor count (recommended); sum/none also supported
+    normalize: mean
+    # Time decay per step (gamma^Δt). Use 1.0 to disable decay.
+    time_gamma: 0.999
+    # Whether to also apply the copy bias during training (usually ok)
+    apply_in_training: true
+
+  class_name: RIFT
+
+  entity_embedder:
+    type: lookup_embedder
+    +++: +++
+  relation_embedder:
+    type: lookup_embedder
+    +++: +++
+  time_embedder:
+    type: lookup_embedder
+    +++: +++
